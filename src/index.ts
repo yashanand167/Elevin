@@ -1,7 +1,8 @@
 import { Hono } from "hono";
 import { Bindings, Variables } from "hono/types";
 import { cors } from "hono/cors";
-import { userRouter } from "./routers/index";
+import userRoutes from "./routers/user.route";
+import { feedBackRoutes } from "./routers/feedBack.route";
 import { limiter } from "./validators/index";
 
 const app = new Hono<{
@@ -17,6 +18,7 @@ app.get("/", (c) => {
     message: "Hello World!",
   });
 });
-app.route("/api/v1/users", userRouter);
+app.route("/api/v1/users", userRoutes);
+app.route("/api/v1/feedbacks", feedBackRoutes);
 
 export default app;

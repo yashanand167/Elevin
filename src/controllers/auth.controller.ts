@@ -1,6 +1,10 @@
 import { Hono } from "hono";
 import { Bindings, Variables } from "hono/types";
-import { jwt } from "hono/jwt";
+import {
+  decode as JwtDecode,
+  sign as JwtSign,
+  verify as JwtVerify,
+} from "hono/jwt";
 import * as bcrypt from "bcryptjs";
 import { createFactory } from "hono/factory";
 import { z } from "zod";
@@ -81,17 +85,76 @@ export const createUser = factory.createHandlers(async (c) => {
   }
 });
 
-export const getUser = factory.createHandlers(async (c) => {
+export const loginUser = factory.createHandlers(async (c) => {
   try {
-    const userId = parseInt(c.req.param("id"));
+    const body = await c.req.json();
+    const parseResult = loginSchema.safeParse(body);
+
+    if (!parseResult.success) {
+      return c.json({
+        message: "Bad request",
+        status: 400,
+      });
+    }
+
+    const { email, password } = parseResult.data;
 
     const findUser = await prisma.user.findFirst({
       where: {
-        id: userId,
+        email,
+        password,
       },
     });
 
     if (!findUser) {
+      return c.json({
+        message: "User with email does not exist",
+      });
+    }
+
+    const validatePassword = await bcrypt.compare(password, findUser.password);
+
+    if (!validatePassword) {
+      return c.json({
+        message: "Invalid email or password",
+        status: 401,
+      });
+    }
+
+    const token = await JwtSign({ sub: email }, c.env.JWT_SECRET);
+
+    return c.json({
+      message: "User successfully logged in",
+      token,
+      status: 201,
+    });
+  } catch (error) {
+    return c.json({
+      status: 500,
+      error: "Internal Server Error",
+    });
+  }
+});
+
+export const getUser = factory.createHandlers(async (c) => {
+  try {
+    const userId = parseInt(c.req.param("id"));
+
+    const userExists = await prisma.user.findFirst({
+      where: {
+        id: userId,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        age: true,
+        gender: true,
+        createdAt: true,
+      }
+    });
+
+    if (!userExists) {
       return c.json({
         message: "User doesnt exist",
         status: 404,
@@ -99,7 +162,7 @@ export const getUser = factory.createHandlers(async (c) => {
     }
     return c.json({
       message: "User found",
-      findUser,
+      data: userExists,
       status: 200,
     });
   } catch (error) {
@@ -112,17 +175,15 @@ export const getUser = factory.createHandlers(async (c) => {
 
 export const updateUser = factory.createHandlers(async (c) => {
   try {
-    const body = c.req.json();
     const userId = parseInt(c.req.param("id"));
-
-    const parseResult = userSchema.safeParse(body);
-
-    if (!parseResult.success) {
+    if (isNaN(userId)) {
       return c.json({
-        message: "Bad Request",
+        message: "Invalid user ID",
         status: 400,
       });
     }
+
+    const body = await c.req.json();
 
     const findUser = await prisma.user.findFirst({
       where: {
@@ -132,30 +193,40 @@ export const updateUser = factory.createHandlers(async (c) => {
 
     if (!findUser) {
       return c.json({
-        message: "User doesnt exist",
+        message: "User does not exist",
         status: 404,
       });
     }
-    const { name, age } = parseResult.data;
-    const updateUser = await prisma.user.update({
+
+    const parseResult = userSchema.safeParse(body);
+    if (!parseResult.success) {
+      return c.json({
+        message: "Bad Request",
+        errors: parseResult.error.errors, 
+        status: 400,
+      });
+    }
+
+    const updateData = parseResult.data;
+
+    const updatedUser = await prisma.user.update({
       where: {
         id: userId,
       },
-      data: {
-        name: name,
-        age: age,
-      },
+      data: updateData, 
     });
 
     return c.json({
       message: "User updated successfully",
-      updateUser,
+      user: updatedUser,
       status: 200,
     });
   } catch (error) {
+    console.error("Update User Error:", error);
     return c.json({
-      message: "Internal Server Error",
+      error: "Internal Server Error",
       status: 500,
     });
   }
 });
+
